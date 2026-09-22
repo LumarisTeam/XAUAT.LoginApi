@@ -1,0 +1,16 @@
+<!-- 由 tools/capture-fixtures.py 抓取后脱敏：文本值换成占位符，input 的形态逐字保留。 -->
+<!--
+  这份样本固化了三个真实存在的坑，改动前请先确认它们仍被覆盖：
+    1. pwdEncryptSalt 是**只有 id、没有 name** 的 input —— 用"一条正则匹配整个标签"的
+       实现会因为属性顺序写死而漏掉它（本项目的实现是先切标签再逐个读属性）。
+    2. lt 的 value 是**空串**（不是缺失）—— 解析器要返回 ""，而不是回退成别的值。
+    3. 同一批 input 在页面上出现多次，且 name/value 的先后顺序不一致。
+-->
+<html><body><form id="casLoginForm" method="post">
+<input type="hidden" name="lt" id="lt" value="" />
+<input type="hidden" name="execution" value="e1s1"/>
+<input type="hidden" name="_eventId" value="submit"/>
+<input type="hidden" id="pwdEncryptSalt" value="AbCdEfGhJkMnPqRs" />
+<input type="hidden" id="execution" name="execution" value="e1s1" />
+<input type="hidden" id="lt" name="lt" value="" />
+</form></body></html>

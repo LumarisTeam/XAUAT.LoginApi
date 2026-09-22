@@ -28,9 +28,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Update="TestFixtures/**/*">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <!--
+      必须是 Include 而不是 Update：普通 SDK 项目默认只把 **/*.cs 收进编译项，
+      .html/.json 根本不在 Content 里，而 Update 只能改**已存在**的项 —— 结果就是
+      文件静默不复制到输出目录，测试里 File.ReadAllText 直接抛 FileNotFound。
+      （Web SDK 项目有默认的 **/*.json glob，所以那边用 Update 是成立的。）
+    -->
+    <Content Include="TestFixtures/**/*"
+             CopyToOutputDirectory="PreserveNewest"/>
   </ItemGroup>
 
 </Project>

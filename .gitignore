@@ -11,3 +11,7 @@ riderModule.iml
 
 # 运行时日志（按天轮转，保留 31 天）
 logs/
+
+# 抓取到的**原始**上游样本：含真实姓名/课程/学籍信息，绝不入库。
+# 入库的 fixture 是从中脱敏提炼后放在 TestFixtures/ 根下的那几个小文件。
+XAUAT.LoginApi.Tests/TestFixtures/raw/

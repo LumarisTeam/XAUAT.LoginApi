@@ -73,6 +73,10 @@ csproj 把 `IL2026`/`IL3050` 设成了编译错误。因此：
 - `#pwdEncryptSalt` 有三态：输入框缺失 → 明文密码；有框无 `value` → 用默认盐；
   有框 `value=""` → **空串**（走明文）。写成"空串回退默认盐"会发出一份上游解不开的密文。
 - `POST /ws/schedule-table/datum` 的 `studentId` 是**字面量字符串 `"null"`**，不是 JSON null。
+- `pwdEncryptSalt` 是**只有 `id`、没有 `name`** 的 input。用"一条正则同时匹配 name 和 value"
+  会漏掉它，进而**发出明文密码**——所以解析必须先切 `<input>` 标签、再逐个读属性。
+- 考试页 URL **必须带尾斜杠**（`/for-std/exam-arrange/`）。无斜杠会返回 HTTP 200 但内容是
+  「学籍信息」页，不重定向也不报错，解析器会静默拿到空列表。
 - `/login/{u}/{p}` 登录失败**返回 200**，是刻意保留的历史怪癖。
 
 ## Architecture
@@ -121,8 +125,11 @@ xUnit + Moq。两个测试替身在 `TestSupport/`：
 `Tests/TestFixtures/`（上游抓取样本）与 `XAUAT.LoginApi.Web/TestFixtures/`
 （测试账号旁路数据）**用途不同**，别搞混。
 
-## 尚未完成
+## 测试样本
 
-`tools/capture-fixtures.py` **还没有用真实账号跑过**。CAS 选择器、考试页正则、AES 加密
-都是按 Flask 代码逆推的，逻辑逐行对齐但未经真实响应验证。切换生产前必须先跑一次并核对
-`capture-report.txt`。
+`tools/capture-fixtures.py` 已用真实账号跑过一次（2026-09-22）。
+原始响应写在 `TestFixtures/raw/`（**已 gitignore，含真实个人信息，不要提交**）；
+脱敏后的小样本固化在 `TestFixtures/` 根下，由 `Tests/Xauat/RealFixtureTests.cs` 守着。
+
+**仍未确认**：带尾斜杠的考试页返回的是 `var studentExamList` 还是 `<table id="exams">`。
+补抓一次脚本即可确认，随后对齐 `XauatScheduleParser.StandardizeExams`。

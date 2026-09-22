@@ -18,7 +18,7 @@ C# 解析器等于盲写。所以先用真实账号抓一遍，把响应原文�
 依赖
 ----
 复用 Flask 项目的虚拟环境即可（requests + cryptography 都在里面）：
-    uv run --project /Users/luckyfish/Documents/Project/PythonProjects/xauat_login_flask \
+    uv run --project ../../PythonProjects/xauat_login_flask python tools/capture-fixtures.py <学号> <密码>
         python tools/capture-fixtures.py <学号> <密码>
 
 输出
@@ -71,8 +71,15 @@ BASE_HEADERS = {
 }
 JSON_HEADERS = {**BASE_HEADERS, "Accept": "application/json, text/plain, */*"}
 
+# 与 Flask 的 XAUATParser.extract_exams_from_html 同形的清洗正则，仅用于诊断输出。
+# 写成模块级常量而不是内联在 f-string 里：Python 3.12 之前不允许 f-string 的
+# 表达式部分出现反斜杠（本项目按 3.10+ 兼容，README 也是这么写的）。
+TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIXTURE_DIR = REPO_ROOT / "XAUAT.LoginApi.Tests" / "TestFixtures"
+# 原始抓取物含真实姓名/课程/学籍信息，**绝不能入库**，因此写进 raw/ 子目录（已在 .gitignore）。
+# 入库的 fixture 是人工从中脱敏提炼出来的那几个小文件，见 TestFixtures/ 下的注释。
+FIXTURE_DIR = REPO_ROOT / "XAUAT.LoginApi.Tests" / "TestFixtures" / "raw"
 REPORT_PATH = FIXTURE_DIR / "capture-report.txt"
 
 _report_lines: list[str] = []
@@ -308,27 +315,50 @@ def main() -> int:
         report()
 
     # ---------------------------------------------------------------- 7. 考试
-    report("[7/7] GET for-std/exam-arrange")
-    exams = session.get(f"{BASE_URL}/for-std/exam-arrange", headers=BASE_HEADERS, timeout=(10, 30))
+    # 尾斜杠不能省！实测 /for-std/exam-arrange（无斜杠）返回 HTTP 200 但内容其实是
+    # 「学籍信息」页，既不重定向也不报错，解析器会静默拿到空考试列表。
+    # 这里两个都抓、都记，便于确认差异。
+    report("[7/7] GET for-std/exam-arrange/（带尾斜杠）")
+    exams = session.get(f"{BASE_URL}/for-std/exam-arrange/", headers=BASE_HEADERS, timeout=(10, 30))
     describe("考试页", exams)
+    page_title = None
+    title_match = re.search(r"<title>([^<]*)</title>", exams.text)
+    if title_match:
+        page_title = title_match.group(1).strip()
+    report(f"  页面标题: {page_title!r}（应为考试相关；若是「学籍信息」说明 URL 又错了）")
+
     save("exam-arrange.html", redact(exams.text, secrets))
+
+    # 对照抓一次无斜杠的版本，确认它确实指向别的页面
+    report("  对照：GET for-std/exam-arrange（无尾斜杠）")
+    wrong = session.get(f"{BASE_URL}/for-std/exam-arrange", headers=BASE_HEADERS, timeout=(10, 30))
+    wrong_title = re.search(r"<title>([^<]*)</title>", wrong.text)
+    report(f"    HTTP {wrong.status_code}  标题: {wrong_title.group(1).strip() if wrong_title else '<无>'!r}")
+    if wrong.url != exams.url:
+        report(f"    重定向到: {wrong.url}")
+    save("exam-arrange-no-slash.html", redact(wrong.text, secrets))
 
     match = re.search(r"var\s+studentExamInfoVms\s*=\s*(\[[\s\S]*?\]);", exams.text)
     report(f"  studentExamInfoVms 正则命中: {match is not None}")
     if match:
         raw = match.group(1)
         report(f"  匹配到的 JS 数组长度: {len(raw)} 字符")
-        report(f"  是否含单引号（.NET 侧迁移要注意）: {chr(39) in raw}")
-        report(f"  是否含 undefined: {'undefined' in raw}")
-        report(f"  是否有尾逗号: {bool(re.search(r',(\s*[}\]])', raw))}")
+        has_single_quote = chr(39) in raw
+        has_undefined = "undefined" in raw
+        has_trailing_comma = bool(TRAILING_COMMA_RE.search(raw))
+        report(f"  是否含单引号（.NET 侧迁移要注意）: {has_single_quote}")
+        report(f"  是否含 undefined: {has_undefined}")
+        report(f"  是否有尾逗号: {has_trailing_comma}")
     else:
         report("  !! 没匹配到 —— .NET 侧这个正则需要改，请人工看 exam-arrange.html")
     report()
 
     report("=" * 72)
     report(f"完成。样本目录：{FIXTURE_DIR}")
-    report("请人工检查：学号/姓名是否还有残留；再确认 cas-login-page.html 里")
-    report("pwdEncryptSalt 的 input 形态（有无 value 属性）与 exam 页 JS 的引号风格。")
+    report("原始样本写在 TestFixtures/raw/ 下，该目录已在 .gitignore 中——")
+    report("里面有真实姓名/课程/学籍信息，**不要**提交。")
+    report("入库的 fixture 请从中人工脱敏提炼（保留结构、替换文本），见")
+    report("XAUAT.LoginApi.Tests/TestFixtures/ 下各文件的头部注释。")
     report("=" * 72)
     _flush()
     return 0

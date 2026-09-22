@@ -21,6 +21,17 @@ internal static class XauatConstants
     /// <summary>教务系统基地址。</summary>
     public const string StudentBaseUrl = "https://swjw.xauat.edu.cn/student";
 
+    /// <summary>
+    /// 考试安排页。
+    /// <para>
+    /// <b>尾斜杠不能省</b>：实测（见 <c>tools/capture-fixtures.py</c> 的抓取报告）
+    /// <c>/for-std/exam-arrange</c>（无斜杠）会返回 HTTP 200 但内容其实是**「学籍信息」**页，
+    /// 既不重定向也不报错，于是解析器静默返回空数组——Flask 那边就是这样，
+    /// 结果是日历里从来没有考试事件。EduApi 的 <c>ExamService</c> 用的是带斜杠的地址。
+    /// </para>
+    /// </summary>
+    public const string ExamArrangeUrl = "https://swjw.xauat.edu.cn/student/for-std/exam-arrange/";
+
     /// <summary>教务系统主机名，用于 cookie 归属。</summary>
     public const string StudentHost = "swjw.xauat.edu.cn";
 

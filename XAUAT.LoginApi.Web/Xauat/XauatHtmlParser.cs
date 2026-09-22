@@ -50,12 +50,20 @@ internal static partial class XauatHtmlParser
     private static partial Regex SemesterIdRegex();
 
     /// <summary>
-    /// 考试页上的 JS 数据数组。取的是 <c>var studentExamInfoVms = [...];</c> 的字面量，
-    /// 它并不是合法 JSON（单引号、<c>undefined</c>、尾逗号），需要再清洗，见
-    /// <see cref="ExamScriptCleaner"/>。
+    /// 考试页上的 JS 数据数组。
+    /// <para>
+    /// 同时接受两个变量名，因为两边的既有实现用的不是同一个：
+    /// Flask 是 <c>studentExamInfoVms</c>，EduApi 的 <c>ExamService</c> 是 <c>studentExamList</c>。
+    /// 真实页面上究竟是哪个还未经样本确认（<c>/for-std/exam-arrange</c> 少了尾斜杠会返回学籍信息页，
+    /// 见 <see cref="XauatConstants.ExamArrangeUrl"/>），所以先两个都认。
+    /// </para>
+    /// <para>
+    /// 取到的是 JS 字面量而非合法 JSON（单引号、<c>undefined</c>、尾逗号），
+    /// 需要再清洗，见 <see cref="ExamScriptCleaner"/>。
+    /// </para>
     /// </summary>
-    [GeneratedRegex(@"var\s+studentExamInfoVms\s*=\s*(\[[\s\S]*?\]);")]
-    private static partial Regex ExamInfoVmsRegex();
+    [GeneratedRegex(@"var\s+student(?:ExamInfoVms|ExamList)\s*=\s*(\[[\s\S]*?\]);")]
+    private static partial Regex ExamArrayRegex();
 
     /// <summary>CAS 的 <c>&lt;span id="msg"&gt;</c> 错误提示。</summary>
     [GeneratedRegex("""<span[^>]*\bid\s*=\s*["']msg["'][^>]*>(.*?)</span>""",
@@ -90,9 +98,9 @@ internal static partial class XauatHtmlParser
     }
 
     /// <summary>提取考试页 JS 数组的原始文本（仍是 JS 字面量，未清洗）；找不到返回 null。</summary>
-    public static string? ParseExamInfoVmsRaw(string html)
+    public static string? ParseExamArrayRaw(string html)
     {
-        var match = ExamInfoVmsRegex().Match(html);
+        var match = ExamArrayRegex().Match(html);
         return match.Success ? match.Groups[1].Value : null;
     }
 
