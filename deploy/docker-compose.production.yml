@@ -1,0 +1,35 @@
+services:
+  loginapi:
+    image: ${IMAGE:?IMAGE must be set to an immutable image tag}
+    # 固定容器名，使其在共享网络上的 DNS 名稳定为 xauat-loginapi。
+    # 本服务替代的是 schedule.xauat.site 上的 Flask（端口 6173），
+    # 切换到它只需要把该域名的反向代理指到本容器。
+    container_name: xauat-loginapi
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # 让日志落到具名卷上。默认值也是 logs/，这里显式写成绝对路径，
+      # 避免工作目录变化时日志散落。
+      LOG_DIR: /app/logs
+    volumes:
+      # 日志按天轮转、保留 31 天，重启时由 InMemoryLogStore 回填，
+      # 因此必须持久化——否则每次重建容器 /Logs 都会空。
+      - loginapi-logs:/app/logs
+    # /Logs 需要被管理端（lumaris_admin）从浏览器直接访问，走反向代理即可，
+    # 无需在宿主机上直接暴露端口。若调度器需要直接探活，再单独加 ports。
+    networks:
+      xauat-net:
+        aliases:
+          - xauat-loginapi
+
+volumes:
+  loginapi-logs:
+
+networks:
+  # 与 EduApi / PaymentAPI 共用。首次部署前需在宿主机上创建一次：
+  #   docker network create xauat-net
+  # CI 的部署脚本会幂等地创建它。
+  xauat-net:
+    external: true
+    name: ${NETWORK_NAME:-xauat-net}

@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <!--
+          AOT 是构建期选项（不是运行期开关）：默认开启；由命令行 -p:PublishAot=false
+          或 Dockerfile 的构建参数 AOT_ENABLED=false 关闭。
+          写成 Condition 形式而非裸 <PublishAot>true</PublishAot>：命令行传进来的是全局属性、
+          本来就压得过项目内的裸值，但那条"可被覆盖"的契约只藏在 MSBuild 的隐式规则里；
+          条件式把它放到明面上，也不会覆盖上层已给定的值。
+          关掉 AOT 时下面那组 IL2026/IL3050 守卫会随条件一起失效，防腐化的把关点在 CI 的
+          aot-check job（它固定 -p:PublishAot=true），不在这里。
+        -->
+        <PublishAot Condition="'$(PublishAot)' == ''">true</PublishAot>
+        <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+        <!-- 决定产物名（AOT 的原生二进制 / JIT 的 apphost 同名），也是 Dockerfile ENTRYPOINT 的名字 -->
+        <AssemblyName>XAUAT.LoginApi</AssemblyName>
+        <RootNamespace>XAUAT.LoginApi</RootNamespace>
+        <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    </PropertyGroup>
+
+    <!--
+      AOT 能力守卫：自己代码的直接调用点一旦出现 IL2026/IL3050 即构建失败。
+      本项目尤其要守住——迁移自 Flask 的解析逻辑很容易让人想引入 HtmlAgilityPack 或
+      Newtonsoft，而那两者都会让 Native AOT 失效（整套解析因此刻意只用 [GeneratedRegex]）。
+      IL2104/IL3053（第三方程序集的聚合告警）刻意不设为错误，否则会被
+      StackExchange.Redis 这类未做 AOT 标注的依赖无谓卡死。
+    -->
+    <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+        <WarningsAsErrors>$(WarningsAsErrors);IL2026;IL3050</WarningsAsErrors>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="DotNetEnv" Version="3.2.0"/>
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12"/>
+        <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="10.0.7"/>
+        <PackageReference Include="StackExchange.Redis" Version="2.12.14"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="XAUAT.LoginApi.Tests"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Update="TestFixtures/**/*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="..\.dockerignore">
+            <Link>.dockerignore</Link>
+        </Content>
+    </ItemGroup>
+
+</Project>

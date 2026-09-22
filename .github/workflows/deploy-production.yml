@@ -1,0 +1,191 @@
+name: Build and Deploy
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      aot:
+        description: 使用 Native AOT 构建（选 false 则走 JIT 自包含发布）
+        type: choice
+        options:
+          - "true"
+          - "false"
+        default: "true"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: 10.0.x
+  REGISTRY: ghcr.io
+  AOT_ENABLED: ${{ inputs.aot || 'true' }}
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Restore
+        run: dotnet restore XAUAT.LoginApi.slnx
+      - name: Build
+        run: dotnet build XAUAT.LoginApi.slnx --no-restore --configuration Release
+      - name: Test
+        run: dotnet test XAUAT.LoginApi.slnx --no-build --configuration Release --verbosity normal
+
+  # 防止 AOT 能力腐化：本项目从 Flask 迁移时，解析逻辑最容易诱导人引入
+  # HtmlAgilityPack / Newtonsoft / Ical.Net，而它们都会让 Native AOT 失效
+  # （整套解析因此刻意只用 [GeneratedRegex]，ICS 也是手写的）。
+  # linux-x64 的原生二进制无法在 macOS 上交叉编译，因此本机开发时验证不了，
+  # 这一步是唯一的把关点。
+  #
+  # 手动选了 JIT 变体时整步跳过：这个开关的用武之地，往往正是 AOT 发布已经跑不通
+  # （新依赖不支持 AOT、链接失败等）而需要临时改用 JIT 顶上——门要是还拦着，
+  # 它就从"逃生口"变成了"锁死"。腐化仍会在下一次 push/PR 时被拦下。
+  aot-check:
+    name: AOT publish gate
+    needs: test
+    if: ${{ inputs.aot != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Install Native AOT prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+      - name: Publish with Native AOT
+        run: |
+          dotnet publish XAUAT.LoginApi.Web/XAUAT.LoginApi.Web.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            -p:PublishAot=true \
+            --output ./aot-out 2>&1 | tee aot.log
+      # csproj 里已把 IL2026/IL3050 设为错误，正常情况下上一步就会失败。
+      # 这里再查一遍是为了在有人改动 csproj 后仍然拦得住，并给出更明确的报错。
+      - name: Assert no AOT analyzer warnings from our own code
+        run: |
+          if grep -qE "warning IL2026|warning IL3050" aot.log; then
+            echo "::error::检测到 IL2026/IL3050：有代码走到了 Native AOT 不支持的路径"
+            grep -E "warning IL2026|warning IL3050" aot.log
+            exit 1
+          fi
+
+  publish:
+    name: Build image
+    needs: [test, aot-check]
+    # 有 job 被跳过时，dependent 默认跟着被跳过，所以必须显式写出 always() 加各 needs 的结果判定。
+    if: |
+      always() && !cancelled()
+      && github.event_name != 'pull_request'
+      && needs.test.result == 'success'
+      && (needs.aot-check.result == 'success' || needs.aot-check.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      tag: ${{ steps.image.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve image name, tag and cache scope
+        id: image
+        shell: bash
+        run: |
+          repository="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          image="${REGISTRY}/${repository}"
+          if [[ "$AOT_ENABLED" == "true" ]]; then
+            suffix=""
+            extra_tag="latest"
+            cache_scope="aot"
+          else
+            # 备用变体：tag 加 -jit 后缀，另外推进一个移动 tag :jit 供 deploy/build.sh 直接用。
+            # 刻意不动 :latest —— 默认镜像必须始终是 AOT 那一个，否则一次手动 JIT 部署之后，
+            # 任何人跑 ./build.sh（默认取 :latest）都会静默拿到 JIT 镜像。
+            suffix="-jit"
+            extra_tag="jit"
+            cache_scope="jit"
+          fi
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_SHA}${suffix}" >> "$GITHUB_OUTPUT"
+          echo "extra_tag=${extra_tag}" >> "$GITHUB_OUTPUT"
+          echo "cache_scope=${cache_scope}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            AOT_ENABLED=${{ env.AOT_ENABLED }}
+          tags: |
+            ${{ steps.image.outputs.image }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.image }}:${{ steps.image.outputs.extra_tag }}
+          cache-from: type=gha,scope=${{ steps.image.outputs.cache_scope }}
+          cache-to: type=gha,mode=max,scope=${{ steps.image.outputs.cache_scope }}
+
+  deploy:
+    name: Deploy
+    needs: publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      # EduApi / PaymentAPI 与本服务共用这张网络
+      NETWORK_NAME: xauat-net
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy compose file to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          source: "deploy/docker-compose.production.yml"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 1
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE: ${{ needs.publish.outputs.image }}:${{ needs.publish.outputs.tag }}
+          NETWORK_NAME: ${{ env.NETWORK_NAME }}
+          COMPOSE_PROJECT_NAME: xauat-loginapi
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+          envs: IMAGE,NETWORK_NAME,COMPOSE_PROJECT_NAME,GHCR_PULL_TOKEN
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            # compose 文件名可能已是 docker-compose.yml（上一次部署改名过），统一一下
+            if [ -f docker-compose.production.yml ]; then
+              mv -f docker-compose.production.yml docker-compose.yml
+            fi
+            # 幂等创建共享网络
+            docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
+            if [ -n "$GHCR_PULL_TOKEN" ]; then
+              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            fi
+            IMAGE="$IMAGE" docker compose pull loginapi
+            IMAGE="$IMAGE" docker compose up -d --no-build --remove-orphans loginapi
+            docker image prune -f
+            if [ -n "$GHCR_PULL_TOKEN" ]; then docker logout ghcr.io || true; fi

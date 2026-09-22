@@ -1,0 +1,20 @@
+[
+  {
+    "lessonId": "lesson-test-101",
+    "courseName": "测试数据结构",
+    "personName": "张老师",
+    "roomZh": "教学楼A101",
+    "date": "2026-03-02",
+    "startTime": 800,
+    "endTime": 950
+  },
+  {
+    "lessonId": "lesson-test-202",
+    "courseName": "测试软件工程",
+    "personName": "李老师",
+    "roomZh": "实验楼B202",
+    "date": "2026-03-04",
+    "startTime": 1000,
+    "endTime": 1150
+  }
+]

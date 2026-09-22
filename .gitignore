@@ -1,0 +1,13 @@
+bin/
+obj/
+/packages/
+riderModule.iml
+/_ReSharper.Caches/
+.idea/
+.DS_Store
+
+# 部署密钥与测试账号口令，绝不入库
+.env
+
+# 运行时日志（按天轮转，保留 31 天）
+logs/

@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="compose.yaml" />
+  </Folder>
+  <Project Path="XAUAT.LoginApi.Web/XAUAT.LoginApi.Web.csproj" />
+  <Project Path="XAUAT.LoginApi.Tests/XAUAT.LoginApi.Tests.csproj" />
+</Solution>

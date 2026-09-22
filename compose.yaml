@@ -1,0 +1,23 @@
+# 本地开发用的 compose（由 IDE 生成后手工调整）。
+# 生产部署用的是 deploy/docker-compose.production.yml，两者容器名一致，
+# 但生产那份不映射宿主机端口——本服务对外经反向代理访问。
+services:
+  loginapi:
+    image: xauat-loginapi
+    container_name: xauat-loginapi
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      LOG_DIR: /app/logs
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - loginapi-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  loginapi-logs:
