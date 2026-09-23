@@ -113,6 +113,7 @@ app.UseCors();
 
 app.MapGet("/health", () => Results.Text("ok"));
 
+app.MapAuthEndpoints();
 app.MapStatisticsEndpoints();
 app.MapOpsEndpoints();
 

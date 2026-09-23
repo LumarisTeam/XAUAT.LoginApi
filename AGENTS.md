@@ -123,8 +123,8 @@ xUnit + Moq。两个测试替身在 `TestSupport/`：
 - `FakeSsoClient` —— 默认行为是"完整登录只返回 SSO 票据、换票才返回教务会话"，
   即真实上游的行为，让测试默认跑在生产路径上
 
-`Tests/TestFixtures/`（上游抓取样本）与 `XAUAT.LoginApi.Web/TestFixtures/`
-（测试账号旁路数据）**用途不同**，别搞混。
+`Tests/TestFixtures/` 放上游抓取样本（现已只剩 CAS 登录页那一份）；
+测试账号旁路用的固定数据（课表/考试）随日历功能迁到了 XAUAT.EduApi 的 `TestFixtures/`。
 
 ## 测试样本
 
@@ -132,5 +132,10 @@ xUnit + Moq。两个测试替身在 `TestSupport/`：
 原始响应写在 `TestFixtures/raw/`（**已 gitignore，含真实个人信息，不要提交**）；
 脱敏后的小样本固化在 `TestFixtures/` 根下，由 `Tests/Xauat/RealFixtureTests.cs` 守着。
 
-**仍未确认**：带尾斜杠的考试页返回的是 `var studentExamList` 还是 `<table id="exams">`。
-补抓一次脚本即可确认，随后对齐 `XauatScheduleParser.StandardizeExams`。
+现在只剩 `cas-login-page.html` 一份：学期、课表、考试那几份样本随日历功能迁到了
+XAUAT.EduApi 的测试一侧。
+
+**考试页至今没有真实样本**：2026-09-22 那次抓取（带斜杠、不带斜杠各抓了一份）
+拿到的都是「学籍信息」页——`studentExamInfoVms`、`studentExamList`、
+`<table id="exams">` 一个都没有，多半是 9 月还没排考。要确认结构得在**考试周**重抓。
+这件事现在归 XAUAT.EduApi 的 `ExamService`（它用的是带尾斜杠的地址）。

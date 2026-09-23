@@ -144,18 +144,18 @@ AOT=false ./build.sh          # JIT 变体（AOT 出问题时的逃生口）
 `RuntimeFeature.IsDynamicCodeSupported` 编成常量 false，即使进程是 JIT 运行的。
 `docker build` 的两种变体都是准的（`-p:PublishAot` 与产物一致），只有本地 `dotnet run` 会骗人。
 
-## 上游样本：已抓取并验证 ✅（考试页待补抓）
+## 上游样本：已抓取并验证 ✅
 
-解析器**已用真实账号抓取的上游响应验证过**（2026-09-22），样本经脱敏后固化在
+登录侧解析器**已用真实账号抓取的上游响应验证过**（2026-09-22），样本经脱敏后固化在
 `XAUAT.LoginApi.Tests/TestFixtures/`，并由 `Tests/Xauat/RealFixtureTests.cs` 守成回归测试：
 
 | 环节 | 结果 |
 | --- | --- |
 | CAS 登录页字段 | `lt=""`、`execution="e1s1"`、`_eventId="submit"`、`pwdEncryptSalt="AbCdEfGhJkMnPqRs"` —— 与抓取脚本独立提取的结果完全一致 |
-| 学期 id | `361` ✓ |
-| 课程标准化 | **315/315 条**全部解析成功，`Unknown Course`/`Unknown Teacher`/`未知地点` 各 0 条 |
 | 字符集 | CAS 与教务**全是 UTF-8**，无需引入 `System.Text.Encoding.CodePages` |
-| 考试页 | ⚠️ **待补抓** —— 见下方 |
+
+学期、课表、考试那三份样本与它们的回归测试**随日历功能迁到了 XAUAT.EduApi**
+（那边是 `ExamService`/`CourseService` 在解析同一套教务数据）。
 
 ### 两个只有真实样本才能发现的坑
 
@@ -164,35 +164,22 @@ AOT=false ./build.sh          # JIT 变体（AOT 出问题时的逃生口）
    本项目"先切 `<input>` 标签、再逐个读属性"的写法正是为此。
 
 2. **`/for-std/exam-arrange` 少了尾斜杠会返回「学籍信息」页**（HTTP 200、无重定向）。
-   Flask 因此一直在静默返回空考试列表。已改用带斜杠的地址，并把两个变量名
-   （Flask 的 `studentExamInfoVms`、EduApi 的 `studentExamList`）都纳入解析。
-
-### 考试页仍需补抓一次
-
-带尾斜杠的地址是照 EduApi 的既有实现改的，**尚未用样本确认**它返回的到底是
-`var studentExamList = [...]` 还是 `<table id="exams">`。补抓只需再跑一次脚本：
-
-```bash
-uv run --project ../../PythonProjects/xauat_login_flask \
-    python tools/capture-fixtures.py <学号> <密码>
-```
-
-脚本现在会把**原始**响应写到 `XAUAT.LoginApi.Tests/TestFixtures/raw/`（已 gitignore，
-含真实姓名与学籍信息，**不要提交**），并同时抓取带斜杠与不带斜杠两个版本做对照。
-拿到之后请把考试页的结构发出来，再把 `XauatScheduleParser.StandardizeExams` 对齐。
+   Flask 因此一直在静默返回空考试列表。这条现在归 XAUAT.EduApi——它的 `ExamService`
+   用的是带尾斜杠的地址，那份考古记录在该类的 `ExamArrangePath` 注释里。
+   顺带一个更新：2026-09-22 抓的两个样本其实**都是「学籍信息」页**（见上），
+   所以"考试页到底返回哪个变量"至今没有真实样本，得在考试周重抓。
 
 ## 项目结构
 
 ```
 XAUAT.LoginApi.Web/
-├── Xauat/          纯协议层：CAS 客户端、教务客户端、HTML 正则解析、AES 加密、cookie 罐
+├── Xauat/          纯协议层：CAS 客户端、HTML 正则解析、AES 加密、cookie 罐
 ├── Services/       业务编排：登录三级优先级、活跃统计、测试账号
 ├── Redis/          裸 IDatabase 封装 + 限流封禁语义（刻意不用三级缓存，见上）
 ├── Ops/            日志环形缓冲 + 按天轮转文件
-├── Endpoints/      Minimal API 端点
-└── TestFixtures/   测试账号旁路用的固定数据
+└── Endpoints/      Minimal API 端点
 
-XAUAT.LoginApi.Tests/   119 个测试；TestFixtures/ 放上游抓取样本
+XAUAT.LoginApi.Tests/   112 个测试；TestFixtures/ 放上游抓取样本（仅 CAS 登录页）
 tools/capture-fixtures.py
 ```
 
