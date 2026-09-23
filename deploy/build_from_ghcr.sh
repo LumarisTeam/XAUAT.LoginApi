@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 服务器单例部署：从 ghcr 拉取预构建镜像，复用本目录的 compose 定义起一个容器。
+# 服务器单例部署：从镜像仓库拉取预构建镜像，复用本目录的 compose 定义起一个容器。
 #
 # 为什么是"拉"而不是"构建"：本项目默认以 Native AOT 发布，服务器上从源码构建需要 SDK 镜像
 # 加装 clang / zlib1g-dev，一次 publish 动辄数分钟并吃满 CPU 与内存；而 CI
@@ -8,16 +8,19 @@
 # 本脚本只负责拉取与重启。
 #
 # 变体切换（AOT / JIT）：AOT 是构建期选择，两种变体是两个镜像，靠 tag 区分——
-#   默认（AOT）  -> ghcr.io/lijiajunply/xauat.loginapi:latest
-#   JIT 变体      -> ghcr.io/lijiajunply/xauat.loginapi:jit
+#   默认（AOT）  -> ccr.ccs.tencentyun.com/lumaris/xauat.loginapi:latest
+#   JIT 变体      -> ccr.ccs.tencentyun.com/lumaris/xauat.loginapi:jit
+#   （USE_GHCR=1 时这两个都换成 ghcr.io/lijiajunply/xauat.loginapi 的同名 tag）
 #   AOT=false ./build_from_ghcr.sh              # 切到 JIT 变体
-#   ./build_from_ghcr.sh ghcr.io/...:<sha>-jit  # JIT 的某个具体版本
+#   ./build_from_ghcr.sh ccr.ccs.tencentyun.com/...:<sha>-jit  # JIT 的某个具体版本
 #
 # 用法：
 #   ./build_from_ghcr.sh
-#   ./build_from_ghcr.sh ghcr.io/lijiajunply/xauat.loginapi:<commit-sha>   # 指定版本，也是回滚方式
+#   ./build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris/xauat.loginapi:<commit-sha>   # 指定版本，也是回滚方式
 #   AOT=false ./build_from_ghcr.sh
 #   IMAGE=... NETWORK_NAME=... COMPOSE_PROJECT_NAME=... ./build_from_ghcr.sh
+#   USE_GHCR=1 ./build_from_ghcr.sh       # 改从 ghcr.io 拉（国内一般拉不动）
+#   TAKE_OVER=1 ./build_from_ghcr.sh     # 同名容器是 docker run 起的时，先删掉它再起
 #   sh build_from_ghcr.sh                 # /bin/sh 是 dash 时同样可用（脚本会自己切到 bash）
 #
 # 同目录必须有：
@@ -36,13 +39,25 @@ set -euo pipefail
 
 CONTAINER_NAME="xauat-loginapi"
 
+# 镜像来源。CI 把同一批 tag 双推两份：ghcr 作归档，腾讯云 TCR 供国内服务器拉取
+# （ghcr 的镜像层走 pkg-containers.githubusercontent.com，在国内基本拉不动）。
+# 默认走 TCR；要用 ghcr 就 USE_GHCR=1，或用 IMAGE 直接给完整镜像名。
+if [[ "${USE_GHCR:-0}" == "1" ]]; then
+  IMAGE_BASE="ghcr.io/lijiajunply/xauat.loginapi"
+else
+  IMAGE_BASE="ccr.ccs.tencentyun.com/lumaris/xauat.loginapi"
+fi
+
 AOT="${AOT:-true}"
 if [[ "$AOT" == "true" ]]; then
-  DEFAULT_IMAGE="ghcr.io/lijiajunply/xauat.loginapi:latest"
+  DEFAULT_IMAGE="${IMAGE_BASE}:latest"
 else
-  DEFAULT_IMAGE="ghcr.io/lijiajunply/xauat.loginapi:jit"
+  DEFAULT_IMAGE="${IMAGE_BASE}:jit"
 fi
 IMAGE="${IMAGE:-${1:-$DEFAULT_IMAGE}}"
+
+# 镜像仓库域名直接从镜像名里取：登录、登出都用它，换 registry 时不必再改别处。
+REGISTRY_HOST="${IMAGE%%/*}"
 
 if [[ "$IMAGE" == *-jit || "$IMAGE" == *:jit ]]; then
   VARIANT="JIT 自包含（AOT 已关闭，非默认变体）"
@@ -89,16 +104,44 @@ ENV_HELP
   exit 1
 fi
 
+# 固定 container_name 被既有容器占用时，compose 只抛一句
+# "Conflict. The container name ... is already in use"，既不说原因也不说怎么办，
+# 所以这里提前把两种情形分开讲清楚：
+#   有 compose 标签但 project 不同 —— compose 不会接管别的 project 的容器
+#   完全没有 compose 标签          —— 是 `docker run` 起的（仓库根目录 build.sh 那条源码构建路径）
 if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   owner="$(docker container inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$CONTAINER_NAME" 2>/dev/null || true)"
   [[ "$owner" == "<no value>" ]] && owner=""
-  if [[ -n "$owner" && "$owner" != "$COMPOSE_PROJECT_NAME" ]]; then
+
+  if [[ -z "$owner" ]]; then
+    if [[ "${TAKE_OVER:-0}" == "1" ]]; then
+      echo "==> 移除既有容器 ${CONTAINER_NAME}（docker run 创建，不受 compose 管理）"
+      docker rm -f "$CONTAINER_NAME" >/dev/null
+    else
+      cat >&2 <<TAKEOVER
+错误：容器 $CONTAINER_NAME 已存在，但它不带 compose 标签，也就是由 docker run 直接创建的
+      ——多半来自仓库根目录 build.sh 那条源码构建路径。
+
+compose 不会接管这种容器，直接 up 就会报：
+  Conflict. The container name "/$CONTAINER_NAME" is already in use
+
+删它之前先确认它确实是可停的旧容器：
+  docker inspect -f '{{.Config.Image}}' $CONTAINER_NAME
+  docker ps --filter name=$CONTAINER_NAME
+
+确认无误后二选一：
+  docker rm -f $CONTAINER_NAME     # 然后重跑本脚本
+  TAKE_OVER=1 $0                   # 让本脚本替你删掉再起
+TAKEOVER
+      exit 1
+    fi
+  elif [[ "$owner" != "$COMPOSE_PROJECT_NAME" ]]; then
     cat >&2 <<CONFLICT
 错误：容器 $CONTAINER_NAME 已存在，但属于另一个 compose project「${owner}」。
 
 compose 不会接管别的 project 的容器。二选一：
   docker rm -f $CONTAINER_NAME          # 让本脚本接管
-  COMPOSE_PROJECT_NAME=$owner ./build_from_ghcr.sh   # 沿用那个 project
+  COMPOSE_PROJECT_NAME=$owner $0   # 沿用那个 project
 CONFLICT
     exit 1
   fi
@@ -111,12 +154,12 @@ if ! docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
   docker network create "$NETWORK_NAME" >/dev/null
 fi
 
-# ------------------------------------------------------------------ ghcr 登录
+# ------------------------------------------------------------------ 镜像仓库登录
 
-if [[ -n "${GHCR_PULL_TOKEN:-}" ]]; then
-  : "${GHCR_USERNAME:?设置了 GHCR_PULL_TOKEN 就必须同时设置 GHCR_USERNAME}"
-  trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-  printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+if [[ -n "${PULL_TOKEN:-}" ]]; then
+  : "${PULL_USERNAME:?设置了 PULL_TOKEN 就必须同时设置 PULL_USERNAME}"
+  trap 'docker logout "$REGISTRY_HOST" >/dev/null 2>&1 || true' EXIT
+  printf '%s' "$PULL_TOKEN" | docker login "$REGISTRY_HOST" --username "$PULL_USERNAME" --password-stdin
 fi
 
 # ------------------------------------------------------------------ 拉取与启动

@@ -129,17 +129,25 @@ XAUAT.EduApi 的 `TestFixtures/`。）
 ./build.sh
 AOT=false ./build.sh          # JIT 变体（AOT 出问题时的逃生口）
 
-# 服务器上从 ghcr 拉预构建镜像
+# 服务器上从镜像仓库拉预构建镜像（默认腾讯云 TCR）
 ./deploy/build_from_ghcr.sh
-./deploy/build_from_ghcr.sh ghcr.io/lijiajunply/xauat.loginapi:<sha>   # 指定版本 / 回滚
+./deploy/build_from_ghcr.sh ccr.ccs.tencentyun.com/lumaris/xauat.loginapi:<sha>   # 指定版本 / 回滚
 ```
 
-CI（`.github/workflows/deploy-production.yml`）只跑测试并推送镜像到 ghcr，**不部署**；
-服务器上的发布完全由上面第二条命令手动触发，发布时机因此由你决定。
+CI（`.github/workflows/deploy-production.yml`）只跑测试并把镜像推**两份**——ghcr 作归档、
+腾讯云 TCR 供国内服务器拉取——**不部署**；服务器上的发布完全由上面第二条命令手动触发，
+发布时机因此由你决定。
 
-镜像在 ghcr 上默认继承仓库可见性（私有），服务器拉取前需要一张只读凭据。用
-`GHCR_PULL_TOKEN=<classic PAT，仅 read:packages> GHCR_USERNAME=<你的 GitHub 用户名> ./deploy/build_from_ghcr.sh`
-传入即可，脚本用完就 `docker logout`；不传则沿用本机已有的 docker 凭据。
+服务器默认从 TCR 拉：ghcr 的镜像层走 `pkg-containers.githubusercontent.com`，在国内基本
+拉不动（命令能通、认证也能过，就是层下不来）。TCR 是私有仓库，需要一组凭据——用户名是
+腾讯云账号 ID，密码在 TCR 控制台实例管理里「初始化密码」设置：
+
+```bash
+PULL_TOKEN=<固定密码> PULL_USERNAME=<腾讯云账号ID> ./deploy/build_from_ghcr.sh
+```
+
+脚本用完就 `docker logout <registry>`；不传则沿用本机已有的 docker 凭据。要用 ghcr 那份
+就加 `USE_GHCR=1`，凭据换成一张 classic PAT（**只勾 `read:packages`**）。
 
 容器名为 `xauat-loginapi`，加入外部网络 `xauat-net`（与 EduApi / PaymentAPI 共用），
 默认不映射宿主机端口，对外经反向代理访问。日志落在具名卷上，重启时回填到 `/Logs`。
