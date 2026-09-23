@@ -11,9 +11,12 @@ XAUAT.LoginApi 是西安建筑科技大学统一认证（CAS/UAAP）与教务系
 [`xauat_login_flask`](../../PythonProjects/xauat_login_flask) 中 XAUAT 部分的 .NET 重写，
 替代部署在 `schedule.xauat.site` 的那套 Flask。
 
-`XAUAT.EduApi` **不做 SSO 握手**——它只 POST 到本服务拿 `{success, cookies}`
-（见其 `SSOLoginService`）；EduApi 的日历订阅也只是把客户端 302 到这里。
+`XAUAT.EduApi` **不做 SSO 握手**——它只 POST 到本服务拿 `{success, cookies}`。
 所以本服务的接口形状是**跨服务契约**，不是内部细节。
+
+日历订阅（ICS）已迁到 `XAUAT.EduApi` 的 `v1/course/Calendar`：那边本来就有解析同一套
+教务数据的 `CourseService`/`ExamService`，日历没必要在两边各解析一遍。本服务现在只管
+登录与封禁，**不要再往这里加教务侧的数据接口**。
 
 ## Build and Run Commands
 
@@ -54,9 +57,7 @@ uv run --project ../../PythonProjects/xauat_login_flask \
 csproj 把 `IL2026`/`IL3050` 设成了编译错误。因此：
 
 - 上游 HTML 解析**只用 `[GeneratedRegex]`**（`Xauat/XauatHtmlParser.cs`）——
-  真正需要解析的只有 CAS 登录页字段、学期 id、考试页 JS 数组三处，
-  **不要**引入 HtmlAgilityPack / AngleSharp
-- ICS **手写**（`Services/IcsCalendarWriter.cs`），不要引入 Ical.Net
+  现在只剩 CAS 登录页字段这一处，**不要**引入 HtmlAgilityPack / AngleSharp
 - JSON 全部走源生成上下文；响应统一用 `ApiResults.Json<T>()` /
   `Api.Json`，**不要**用 `Results.Json(value, JsonSerializerOptions, ...)` 那个重载（带 `RequiresDynamicCode`）
 - 日志用内置 `ILogger` + 自定义 provider，不要引入 Serilog
@@ -83,12 +84,12 @@ csproj 把 `IL2026`/`IL3050` 设成了编译错误。因此：
 
 ```
 Xauat/       纯协议层，无 Redis、无业务编排
-             XauatSsoClient(CAS 登录 + 换票) / XauatAcademicClient(学期/课表/考试)
+             XauatSsoClient(CAS 登录 + 换票)
              XauatHtmlParser([GeneratedRegex]) / PasswordEncryptor(AES-CBC/PKCS7) / XauatCookieJar
-Services/    AuthService(登录三级优先级) / CalendarService / IcsCalendarWriter / StatisticsService
+Services/    AuthService(登录三级优先级) / StatisticsService
 Redis/       LoginRedisStore(裸 IDatabase) / BanService(限流与封禁语义) / LoginCacheKeys
 Ops/         InMemoryLogStore(环形缓冲 2000) / OpsLoggerProvider / LogFileWriter(按天轮转 31 天)
-Endpoints/   Auth / Calendar / Statistics / Ops
+Endpoints/   Auth / Statistics / Ops
 ```
 
 ### 登录三级优先级（`Services/AuthService.cs`）

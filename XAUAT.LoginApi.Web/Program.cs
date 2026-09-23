@@ -1,8 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Encodings.Web;
-using System.Threading.RateLimiting;
 using DotNetEnv;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 using XAUAT.LoginApi.Configuration;
@@ -57,19 +55,15 @@ builder.Services.AddSingleton(Options.Create(serviceConfig.TestAccount));
 if (serviceConfig.TestAccount.Enabled)
 {
     builder.Services.AddSingleton<ITestAccountResolver, TestAccountResolver>();
-    builder.Services.AddSingleton<ITestDataProvider, TestDataProvider>();
 }
 else
 {
     // 关闭时注册空实现，业务代码就不必到处判空
     builder.Services.AddSingleton<ITestAccountResolver>(NoOpTestAccountResolver.Instance);
-    builder.Services.AddSingleton<ITestDataProvider>(NoOpTestDataProvider.Instance);
 }
 
 // ------------------------------------------------------------------ 业务服务
 builder.Services.AddSingleton<AuthService>();
-builder.Services.AddSingleton<XauatAcademicClient>();
-builder.Services.AddSingleton<CalendarService>();
 builder.Services.AddSingleton<StatisticsService>();
 
 // ------------------------------------------------------------------ HTTP 客户端
@@ -93,24 +87,6 @@ builder.Services.AddHttpClient(XauatSsoClient.ClientName)
         PooledConnectionLifetime = TimeSpan.FromMinutes(5)
     });
 
-// 教务系统：同样的配置。刻意不做证书校验豁免——Flask 用的是 requests 默认校验。
-builder.Services.AddHttpClient(XauatAcademicClient.ClientName)
-    .ConfigureHttpClient(client =>
-    {
-        client.Timeout = XauatConstants.StudentTimeout;
-        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", XauatConstants.UserAgent);
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", XauatConstants.AcceptHtml);
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", XauatConstants.AcceptLanguage);
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Upgrade-Insecure-Requests", "1");
-    })
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-    {
-        AllowAutoRedirect = false,
-        UseCookies = false,
-        AutomaticDecompression = System.Net.DecompressionMethods.All,
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-    });
-
 // 认证服务器需要会话化调用（先 GET 登录页拿 lt/execution，再 POST），因此单例持有客户端
 builder.Services.AddSingleton<IXauatSsoClient, XauatSsoClient>();
 
@@ -121,25 +97,6 @@ builder.Services.AddCors(options => options.AddPolicy(LogsCors.PolicyName, polic
     .WithHeaders("Authorization", "Content-Type", "X-Log-Token")
     .AllowCredentials()));
 
-// ------------------------------------------------------------------ 限流
-// 这是 Flask 没有的一层（它只做应用层的登录失败限流）。加它是为了保护上游：
-// /class 是公开可访问的（URL 里带账号密码即可订阅日历），没有这层的话
-// 一次爬虫扫过来就会把教务系统打满。
-// 用全局并发而非按 IP 分区：目标是限制**对上游的并发压力**，与调用方是谁无关。
-builder.Services.AddRateLimiter(options =>
-{
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-
-    options.AddPolicy("EduCrawler", _ => RateLimitPartition.GetConcurrencyLimiter(
-        "global",
-        _ => new ConcurrencyLimiterOptions
-        {
-            PermitLimit = 8,
-            QueueLimit = 16,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst
-        }));
-});
-
 var app = builder.Build();
 
 // 启动横幅：一条日志就能确认线上跑的是哪个变体——AOT 产物里没有 JIT，此值为 false。
@@ -149,8 +106,6 @@ Console.WriteLine($"[startup] Native AOT: {!RuntimeFeature.IsDynamicCodeSupporte
 Console.WriteLine($"[startup] Redis: {(string.IsNullOrEmpty(serviceConfig.RedisConnectionString) ? "未配置（无缓存模式）" : "已配置")}");
 Console.WriteLine($"[startup] 日志目录: {logDirectory}");
 
-app.UseRateLimiter();
-
 // 必须在端点之前：/Logs 用的是 RequireCors(LogsCors.PolicyName)，
 // 只注册策略而不挂中间件会在请求时抛 "contains CORS metadata, but a middleware was not found"。
 // 其余端点不需要跨域（调用方是服务端与移动端，不走浏览器同源策略）。
@@ -158,8 +113,6 @@ app.UseCors();
 
 app.MapGet("/health", () => Results.Text("ok"));
 
-app.MapAuthEndpoints();
-app.MapCalendarEndpoints();
 app.MapStatisticsEndpoints();
 app.MapOpsEndpoints();
 

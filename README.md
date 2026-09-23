@@ -13,7 +13,7 @@
 Flutter / iOS / 管理端
         │
         ▼
-XAUAT.EduApi  (POST /Login, GET /v1/course/Calendar)
+XAUAT.EduApi  (POST /v1/login；日历订阅 GET /v1/course/Calendar 由它自己生成)
         │
         └──► https://schedule.xauat.site/auth/login      ← Flask 做 SSO
                   │
@@ -21,9 +21,12 @@ XAUAT.EduApi  (POST /Login, GET /v1/course/Calendar)
                             └──► https://swjw.xauat.edu.cn (教务系统)
 ```
 
-EduApi 自己**不做 SSO 握手**：它只 POST JSON 给 Flask 拿 `{success, cookies}`；
-EduApi 的"日历订阅"也只是把客户端 302 到 `schedule.xauat.site/class`。
-本服务就是把这两件事接过来自己做。
+EduApi 自己**不做 SSO 握手**：它只 POST JSON 给 Flask 拿 `{success, cookies}`。
+本服务就是把 SSO 登录接过来自己做。
+
+> **日历订阅已迁走**：ICS 生成（含 ICS 序列化、课表/考试取数）已搬到 XAUAT.EduApi 的
+> `v1/course/Calendar`，因为那里的 `CourseService`/`ExamService` 本来就解析同一套教务数据。
+> 本服务现在只负责登录与封禁。
 
 ## 快速开始
 
@@ -49,8 +52,8 @@ TEST_ACCOUNT_USERNAME=frontend-test
 TEST_ACCOUNT_PASSWORD=frontend-test-password
 ```
 
-命中后 `/auth/login` 返回伪造 cookie，`/class` 用 `XAUAT.LoginApi.Web/TestFixtures/` 里的
-固定课表与考试生成 ICS，全程不碰上游。
+命中后 `/auth/login` 返回伪造 cookie，全程不碰上游。（日历那边的测试账号数据现在归
+XAUAT.EduApi 的 `TestFixtures/`。）
 
 ## API
 
@@ -58,7 +61,6 @@ TEST_ACCOUNT_PASSWORD=frontend-test-password
 | --- | --- | --- |
 | `/auth/login` | POST | body `{username, password, school="xauat"}` → `{success, cookies}` |
 | `/login/{username}/{password}` | GET | 遗留路由。**登录失败也返回 200**（见下方"有意差异"） |
-| `/calendars`、`/class` | GET | `?school=&username=&password=`（或 `passwd`）`&filter=future` → `text/calendar` |
 | `/statistics/users`、`/user_count` | GET | `{"count": N}` |
 | `/security/ban_status` | GET / POST | GET 查询封禁；POST `{school, username}` 解封 |
 | `/security/ban_logs` | GET | 封禁日志 JSON（**新增**，替代 Flask 的 HTML 页） |
@@ -106,15 +108,15 @@ TEST_ACCOUNT_PASSWORD=frontend-test-password
 | # | 差异 | 理由 |
 | --- | --- | --- |
 | 1 | 封禁键从 `(学校, 用户名, 密码哈希)` 收敛为 `(学校, 用户名)` | 原粒度下**换个错误密码就能绕过封禁**。代价：Flask 期间产生的旧封禁不会延续（读路径仍兼容旧键，见 `BanService.FindActiveBansAsync`） |
-| 2 | ICS 补上 `VTIMEZONE` + `DTSTART;TZID=Asia/Shanghai` + `DTSTAMP`/`SEQUENCE`/`STATUS` | Flask 的时间是"浮动"的（无时区），RFC 5545 不允许；**UID 保持逐字不变**，否则老订阅者会看到重复事件 |
+| 2 | ~~ICS 补上 `VTIMEZONE` …~~ **已随日历迁到 XAUAT.EduApi** | 那边的 `IcsCalendarWriter` 逐字继承了这份实现与它的 UID 约定 |
 | 3 | 活跃用户数改为**请求时 SCAN 现算** | Flask 靠 Redis keyspace 通知维护计数器，但 `gunicorn -w 4` 下 4 个 worker 会重复扣减导致系统性偏低；而且它要 `CONFIG SET notify-keyspace-events`，会改到**整个共享 Redis 实例**的全局配置。`user:count:total` 键因此废弃 |
 | 4 | `/admin/ban_logs` HTML 页 → `GET /security/ban_logs` JSON | 本服务是纯 API，不渲染页面 |
 | 5 | 不实现 Flask 的 `/` 落地页 | 同上。**切流时 `schedule.xauat.site/` 会 404**——如果有人靠它拿 webcal 订阅链接，请先告知 |
 | 6 | Redis 降级路径补上了 SSO 换票 | Flask 在 Redis 挂掉时不做换票，于是把教务系统不认的 `CASTGC` 当成功返回（调用方随后必然 401）。降级路径的目标就是"仍然能登录" |
 | 7 | 请求体不是合法 JSON 时返回 **400** | Flask 会因 `get_json(force=True)` 抛异常而变成 500；但同一段代码里的 `"Invalid JSON body"` 分支显然才是作者意图 |
-| 8 | 新增 HTTP 层并发限流（8 并发 / 16 队列） | Flask 完全没有。`/class` 是公开可访问的（URL 带账号密码即可订阅日历），没有这层一次爬虫就会把教务系统打满 |
+| 8 | ~~新增 HTTP 层并发限流~~ **已随日历迁到 XAUAT.EduApi** | 那条公开路径现在由 EduApi 的 `EduCrawler` 策略（同样是 8 并发 / 16 队列）兜底 |
 | 9 | `security:ban_logs` 加 `LTRIM` 封顶 10000 条 | Flask 从不裁剪，该列表无限增长（读却只取前 201 条） |
-| 10 | 考试页改用 `/for-std/exam-arrange/`（**带尾斜杠**） | 这是**修 bug**：实测无斜杠的 `/for-std/exam-arrange` 返回 HTTP 200，但内容其实是「学籍信息」页——既不重定向也不报错，于是 Flask 的解析器一直静默返回空数组，**日历里从来没有考试事件**。EduApi 的 `ExamService` 用的是带斜杠的地址 |
+| 10 | ~~考试页改用 `/for-std/exam-arrange/`（**带尾斜杠**）~~ **已随日历迁到 XAUAT.EduApi** | 那条知识（无斜杠会返回「学籍信息」页且 HTTP 200）保留在 EduApi `ExamService.ExamArrangePath` 的注释里 |
 | 11 | `/login/{u}/{p}` 失败**仍返回 200** | 这不是差异，是**刻意保留**的 Flask 历史怪癖：老客户端可能按"200 + success 字段"判断，改成 401 会让它们把失败当成功 |
 
 ## 部署
@@ -184,7 +186,7 @@ uv run --project ../../PythonProjects/xauat_login_flask \
 ```
 XAUAT.LoginApi.Web/
 ├── Xauat/          纯协议层：CAS 客户端、教务客户端、HTML 正则解析、AES 加密、cookie 罐
-├── Services/       业务编排：登录三级优先级、日历生成、活跃统计、测试账号
+├── Services/       业务编排：登录三级优先级、活跃统计、测试账号
 ├── Redis/          裸 IDatabase 封装 + 限流封禁语义（刻意不用三级缓存，见上）
 ├── Ops/            日志环形缓冲 + 按天轮转文件
 ├── Endpoints/      Minimal API 端点
@@ -199,6 +201,6 @@ tools/capture-fixtures.py
 Native AOT 是硬约束（csproj 把 `IL2026`/`IL3050` 设成了编译错误）：
 
 - **HtmlAgilityPack / AngleSharp** → 真正需要解析的只有三处，全部用 `[GeneratedRegex]` 源生成正则解决
-- **Ical.Net** → ref 反射重，ICS 手写（约 200 行，含 75 字节折行与转义）
+- **Ical.Net** → ref 反射重；ICS 已迁到 XAUAT.EduApi，那边同样是手写（约 200 行）
 - **Flurl** → 用 `HttpClient` 直连
 - **Serilog** → 用内置 `ILogger` + 自定义 provider

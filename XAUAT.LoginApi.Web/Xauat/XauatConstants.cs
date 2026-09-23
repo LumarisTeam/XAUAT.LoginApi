@@ -1,8 +1,12 @@
 namespace XAUAT.LoginApi.Xauat;
 
 /// <summary>
-/// XAUAT 统一认证与教务系统的协议常量。
-/// 全部照抄 Flask（<c>xauat_sso_login.py</c> / <c>xauat_client.py</c>），改动前请先确认上游行为。
+/// XAUAT 统一认证的协议常量。
+/// 全部照抄 Flask（<c>xauat_sso_login.py</c>），改动前请先确认上游行为。
+/// <para>
+/// 教务侧的常量（学期、课表、考试）随日历功能一起迁到了 XAUAT.EduApi，见其
+/// <c>ExamService</c> / <c>CourseService</c>。
+/// </para>
 /// </summary>
 internal static class XauatConstants
 {
@@ -17,20 +21,6 @@ internal static class XauatConstants
 
     /// <summary>CAS 登录后要跳转的目标服务（教务门户的 SSO 入口）。</summary>
     public const string ServiceUrl = "https://swjw.xauat.edu.cn/student/sso/login";
-
-    /// <summary>教务系统基地址。</summary>
-    public const string StudentBaseUrl = "https://swjw.xauat.edu.cn/student";
-
-    /// <summary>
-    /// 考试安排页。
-    /// <para>
-    /// <b>尾斜杠不能省</b>：实测（见 <c>tools/capture-fixtures.py</c> 的抓取报告）
-    /// <c>/for-std/exam-arrange</c>（无斜杠）会返回 HTTP 200 但内容其实是**「学籍信息」**页，
-    /// 既不重定向也不报错，于是解析器静默返回空数组——Flask 那边就是这样，
-    /// 结果是日历里从来没有考试事件。EduApi 的 <c>ExamService</c> 用的是带斜杠的地址。
-    /// </para>
-    /// </summary>
-    public const string ExamArrangeUrl = "https://swjw.xauat.edu.cn/student/for-std/exam-arrange/";
 
     /// <summary>教务系统主机名，用于 cookie 归属。</summary>
     public const string StudentHost = "swjw.xauat.edu.cn";
@@ -64,12 +54,6 @@ internal static class XauatConstants
 
     public const string AcceptLanguage = "zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3";
 
-    /// <summary>教务系统的 JSON 端点用的 Accept。</summary>
-    public const string AcceptJson = "application/json, text/plain, */*";
-
     /// <summary>认证服务器连接的默认超时（Flask 默认 <c>(30, 60)</c>）。</summary>
     public static readonly TimeSpan AuthServerTimeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>教务系统连接的默认超时（Flask 默认 <c>(10, 30)</c>）。</summary>
-    public static readonly TimeSpan StudentTimeout = TimeSpan.FromSeconds(30);
 }

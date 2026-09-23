@@ -45,9 +45,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <Content Update="TestFixtures/**/*">
-            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-        </Content>
     </ItemGroup>
 
     <ItemGroup>

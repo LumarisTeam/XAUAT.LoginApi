@@ -22,7 +22,7 @@ internal readonly record struct LoginFormFields(
 /// <para>
 /// <b>为什么是正则而不是 HTML 解析库</b>：Native AOT 下 HtmlAgilityPack/AngleSharp 都不可用
 /// （反射 + XPath 会触发 IL2026/IL3050，而 csproj 把它们设成了编译错误）。
-/// 好在真正需要"解析"的只有三处，且用 <see cref="GeneratedRegexAttribute"/> 源生成的正则
+/// 好在真正需要"解析"的只剩登录页那两处，且用 <see cref="GeneratedRegexAttribute"/> 源生成的正则
 /// 完全够用且零反射。
 /// </para>
 /// <para>
@@ -40,30 +40,6 @@ internal static partial class XauatHtmlParser
     /// <summary>匹配 <c>attr="v"</c> / <c>attr='v'</c> / <c>attr=v</c> 三种写法。</summary>
     [GeneratedRegex("""([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))""", RegexOptions.IgnoreCase)]
     private static partial Regex AttributeRegex();
-
-    /// <summary>
-    /// 当前学期 id。**逐字照抄 Flask** 的 <c>re.search(r'selected" value="(.*?)"', html)</c>——
-    /// 它靠的是 <c>selected="selected" value="..."</c> 里 <c>selected" value="</c> 这段子串，
-    /// 因此命中的是下拉框里被选中的那一项。看起来像笔误，但它是对的，别"修好"它。
-    /// </summary>
-    [GeneratedRegex("selected\" value=\"(.*?)\"")]
-    private static partial Regex SemesterIdRegex();
-
-    /// <summary>
-    /// 考试页上的 JS 数据数组。
-    /// <para>
-    /// 同时接受两个变量名，因为两边的既有实现用的不是同一个：
-    /// Flask 是 <c>studentExamInfoVms</c>，EduApi 的 <c>ExamService</c> 是 <c>studentExamList</c>。
-    /// 真实页面上究竟是哪个还未经样本确认（<c>/for-std/exam-arrange</c> 少了尾斜杠会返回学籍信息页，
-    /// 见 <see cref="XauatConstants.ExamArrangeUrl"/>），所以先两个都认。
-    /// </para>
-    /// <para>
-    /// 取到的是 JS 字面量而非合法 JSON（单引号、<c>undefined</c>、尾逗号），
-    /// 需要再清洗，见 <see cref="ExamScriptCleaner"/>。
-    /// </para>
-    /// </summary>
-    [GeneratedRegex(@"var\s+student(?:ExamInfoVms|ExamList)\s*=\s*(\[[\s\S]*?\]);")]
-    private static partial Regex ExamArrayRegex();
 
     /// <summary>CAS 的 <c>&lt;span id="msg"&gt;</c> 错误提示。</summary>
     [GeneratedRegex("""<span[^>]*\bid\s*=\s*["']msg["'][^>]*>(.*?)</span>""",
@@ -88,20 +64,6 @@ internal static partial class XauatHtmlParser
             : GetAttributeValue(saltTag, "value") ?? XauatConstants.DefaultEncryptSalt;
 
         return new LoginFormFields(lt, execution, eventId, salt);
-    }
-
-    /// <summary>提取当前学期 id；找不到返回 null。</summary>
-    public static string? ParseSemesterId(string html)
-    {
-        var match = SemesterIdRegex().Match(html);
-        return match.Success ? match.Groups[1].Value : null;
-    }
-
-    /// <summary>提取考试页 JS 数组的原始文本（仍是 JS 字面量，未清洗）；找不到返回 null。</summary>
-    public static string? ParseExamArrayRaw(string html)
-    {
-        var match = ExamArrayRegex().Match(html);
-        return match.Success ? match.Groups[1].Value : null;
     }
 
     /// <summary>提取 <c>span#msg</c> 的文本；找不到返回 null。等价于 Flask 的 <c>soup.find('span', {'id': 'msg'}).text</c>。</summary>

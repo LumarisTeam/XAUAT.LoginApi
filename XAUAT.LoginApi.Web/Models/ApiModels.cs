@@ -108,12 +108,6 @@ internal sealed class MessageResponseDto
     [JsonPropertyName("message")] public string Message { get; set; } = "";
 }
 
-/// <summary><c>{"error": string}</c> —— 日历接口专用的错误形状（注意 key 是 error 不是 message）。</summary>
-internal sealed class ErrorResponseDto(string error)
-{
-    [JsonPropertyName("error")] public string Error { get; } = error;
-}
-
 /// <summary><c>{"count": int}</c> —— 活跃用户数。</summary>
 internal sealed class CountResponseDto(int count)
 {

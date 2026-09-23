@@ -11,7 +11,6 @@ namespace XAUAT.LoginApi.Models;
 [JsonSerializable(typeof(BanStatusResponseDto))]
 [JsonSerializable(typeof(BanItemDto))]
 [JsonSerializable(typeof(MessageResponseDto))]
-[JsonSerializable(typeof(ErrorResponseDto))]
 [JsonSerializable(typeof(CountResponseDto))]
 [JsonSerializable(typeof(LogsResponseDto))]
 [JsonSerializable(typeof(LogEntryDto))]
