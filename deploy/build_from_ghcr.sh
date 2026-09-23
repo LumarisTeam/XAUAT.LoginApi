@@ -10,18 +10,27 @@
 # 变体切换（AOT / JIT）：AOT 是构建期选择，两种变体是两个镜像，靠 tag 区分——
 #   默认（AOT）  -> ghcr.io/lijiajunply/xauat.loginapi:latest
 #   JIT 变体      -> ghcr.io/lijiajunply/xauat.loginapi:jit
-#   AOT=false ./build.sh              # 切到 JIT 变体
-#   ./build.sh ghcr.io/...:<sha>-jit  # JIT 的某个具体版本
+#   AOT=false ./build_from_ghcr.sh              # 切到 JIT 变体
+#   ./build_from_ghcr.sh ghcr.io/...:<sha>-jit  # JIT 的某个具体版本
 #
 # 用法：
-#   ./build.sh
-#   ./build.sh ghcr.io/lijiajunply/xauat.loginapi:<commit-sha>   # 指定版本，也是回滚方式
-#   AOT=false ./build.sh
-#   IMAGE=... NETWORK_NAME=... COMPOSE_PROJECT_NAME=... ./build.sh
+#   ./build_from_ghcr.sh
+#   ./build_from_ghcr.sh ghcr.io/lijiajunply/xauat.loginapi:<commit-sha>   # 指定版本，也是回滚方式
+#   AOT=false ./build_from_ghcr.sh
+#   IMAGE=... NETWORK_NAME=... COMPOSE_PROJECT_NAME=... ./build_from_ghcr.sh
+#   sh build_from_ghcr.sh                 # /bin/sh 是 dash 时同样可用（脚本会自己切到 bash）
 #
 # 同目录必须有：
 #   docker-compose.yml 或 docker-compose.production.yml   （两种名字都认）
 #   .env                                                   （见仓库根的 .env.example）
+
+# 服务器上最常见的调用方式是 `sh build_from_ghcr.sh`，而 Debian/Ubuntu 的 /bin/sh 是 dash：
+# 它既没有 pipefail，也没有 [[ ]] / (( )) / $SECONDS / $BASH_SOURCE，会在下面那行 set
+# 直接以 "Illegal option -o pipefail" 退出，连参数校验都轮不到。
+# 检测到当前不是 bash 就用 bash 重新执行自己，让 `sh x.sh` 与 `./x.sh` 完全等价。
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec bash "$0" "$@"
+fi
 
 set -euo pipefail
 
@@ -89,7 +98,7 @@ if docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
 
 compose 不会接管别的 project 的容器。二选一：
   docker rm -f $CONTAINER_NAME          # 让本脚本接管
-  COMPOSE_PROJECT_NAME=$owner ./build.sh   # 沿用那个 project
+  COMPOSE_PROJECT_NAME=$owner ./build_from_ghcr.sh   # 沿用那个 project
 CONFLICT
     exit 1
   fi
