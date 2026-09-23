@@ -130,9 +130,16 @@ XAUAT.EduApi 的 `TestFixtures/`。）
 AOT=false ./build.sh          # JIT 变体（AOT 出问题时的逃生口）
 
 # 服务器上从 ghcr 拉预构建镜像
-./deploy/build.sh
-./deploy/build.sh ghcr.io/lijiajunply/xauat.loginapi:<sha>   # 指定版本 / 回滚
+./deploy/build_from_ghcr.sh
+./deploy/build_from_ghcr.sh ghcr.io/lijiajunply/xauat.loginapi:<sha>   # 指定版本 / 回滚
 ```
+
+CI（`.github/workflows/deploy-production.yml`）只跑测试并推送镜像到 ghcr，**不部署**；
+服务器上的发布完全由上面第二条命令手动触发，发布时机因此由你决定。
+
+镜像在 ghcr 上默认继承仓库可见性（私有），服务器拉取前需要一张只读凭据。用
+`GHCR_PULL_TOKEN=<classic PAT，仅 read:packages> GHCR_USERNAME=<你的 GitHub 用户名> ./deploy/build_from_ghcr.sh`
+传入即可，脚本用完就 `docker logout`；不传则沿用本机已有的 docker 凭据。
 
 容器名为 `xauat-loginapi`，加入外部网络 `xauat-net`（与 EduApi / PaymentAPI 共用），
 默认不映射宿主机端口，对外经反向代理访问。日志落在具名卷上，重启时回填到 `/Logs`。

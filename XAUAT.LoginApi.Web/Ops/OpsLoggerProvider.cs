@@ -5,7 +5,7 @@ namespace XAUAT.LoginApi.Ops;
 /// <summary>
 /// 把日志同时送进内存环形缓冲（供 <c>/Logs</c> 查询）与按天轮转的文件。
 /// <para>
-/// <b>刻意不清空默认的日志提供程序</b>：部署脚本（<c>build.sh</c> / CI 的 deploy job）
+/// <b>刻意不清空默认的日志提供程序</b>：部署脚本（<c>build.sh</c> / <c>deploy/build_from_ghcr.sh</c>）
 /// 靠容器日志里的 <c>Now listening on</c> / <c>Application started</c> 判断服务是否就绪，
 /// 清掉控制台日志会让就绪检测一直等到超时。因此控制台维持 .NET 原生格式，
 /// 而 <c>/Logs</c> 与日志文件用 Flask 兼容格式——两者互不影响。

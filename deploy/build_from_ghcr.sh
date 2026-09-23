@@ -20,7 +20,7 @@
 #   IMAGE=... NETWORK_NAME=... COMPOSE_PROJECT_NAME=... ./build.sh
 #
 # 同目录必须有：
-#   docker-compose.yml 或 docker-compose.production.yml   （CI 部署到服务器时会重命名为前者）
+#   docker-compose.yml 或 docker-compose.production.yml   （两种名字都认）
 #   .env                                                   （见仓库根的 .env.example）
 
 set -euo pipefail

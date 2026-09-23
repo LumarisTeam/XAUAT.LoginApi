@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # 根目录源码构建：git pull -> docker build -> 换掉旧容器。
-# 与 deploy/build.sh 是两条并行路径，别混着用：
+# 与 deploy/build_from_ghcr.sh 是两条并行路径，别混着用：
 #
 #   本脚本      本机从源码构建镜像并起容器。适合服务器上没有 ghcr 凭据、或就是要跑当前工作区代码。
-#   deploy/     从 ghcr 拉 CI 构建好的不可变镜像，用 compose 起（CI 的 deploy job 走的就是它）。
+#   deploy/     从 ghcr 拉 CI 构建好的不可变镜像，用 compose 起（deploy/build_from_ghcr.sh，唯一的部署路径）。
 #
 # 两条路径的容器名都是 xauat-loginapi，互相不能叠加：本脚本起的是 docker run 直接创建的容器，
-# 不带 compose 标签，之后再用 deploy/build.sh 会因容器名冲突而失败，需要先
+# 不带 compose 标签，之后再用 deploy/build_from_ghcr.sh 会因容器名冲突而失败，需要先
 # `docker rm -f xauat-loginapi`（脚本末尾会把这条命令打出来）。
 #
 # 与 PaymentAPI 脚本的差异：
@@ -179,5 +179,5 @@ echo "    日志 : docker logs -f $CONTAINER_NAME"
 echo "    重建 : ./build.sh ； 切 JIT 变体： AOT=false ./build.sh"
 echo
 echo "    注意 : 本容器由 docker run 直接创建，不带 compose 标签。"
-echo "           以后若改回 CI/deploy 那条路径（deploy/build.sh），先执行："
+echo "           以后若改用 ghcr 那条路径（deploy/build_from_ghcr.sh），先执行："
 echo "             docker rm -f $CONTAINER_NAME"

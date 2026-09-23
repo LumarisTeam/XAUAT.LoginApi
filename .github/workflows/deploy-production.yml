@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build image
 
 on:
   pull_request:
@@ -20,7 +20,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: production-deploy
+  group: build-image
   cancel-in-progress: false
 
 env:
@@ -94,9 +94,6 @@ jobs:
       && needs.test.result == 'success'
       && (needs.aot-check.result == 'success' || needs.aot-check.result == 'skipped')
     runs-on: ubuntu-latest
-    outputs:
-      image: ${{ steps.image.outputs.image }}
-      tag: ${{ steps.image.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - name: Resolve image name, tag and cache scope
@@ -110,9 +107,9 @@ jobs:
             extra_tag="latest"
             cache_scope="aot"
           else
-            # 备用变体：tag 加 -jit 后缀，另外推进一个移动 tag :jit 供 deploy/build.sh 直接用。
+            # 备用变体：tag 加 -jit 后缀，另外推进一个移动 tag :jit 供 deploy/build_from_ghcr.sh 直接用。
             # 刻意不动 :latest —— 默认镜像必须始终是 AOT 那一个，否则一次手动 JIT 部署之后，
-            # 任何人跑 ./build.sh（默认取 :latest）都会静默拿到 JIT 镜像。
+            # 任何人跑 ./deploy/build_from_ghcr.sh（默认取 :latest）都会静默拿到 JIT 镜像。
             suffix="-jit"
             extra_tag="jit"
             cache_scope="jit"
@@ -138,54 +135,3 @@ jobs:
             ${{ steps.image.outputs.image }}:${{ steps.image.outputs.extra_tag }}
           cache-from: type=gha,scope=${{ steps.image.outputs.cache_scope }}
           cache-to: type=gha,mode=max,scope=${{ steps.image.outputs.cache_scope }}
-
-  deploy:
-    name: Deploy
-    needs: publish
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: production
-    env:
-      # EduApi / PaymentAPI 与本服务共用这张网络
-      NETWORK_NAME: xauat-net
-    steps:
-      - uses: actions/checkout@v4
-      - name: Copy compose file to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          source: "deploy/docker-compose.production.yml"
-          target: ${{ secrets.DEPLOY_PATH }}
-          strip_components: 1
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          IMAGE: ${{ needs.publish.outputs.image }}:${{ needs.publish.outputs.tag }}
-          NETWORK_NAME: ${{ env.NETWORK_NAME }}
-          COMPOSE_PROJECT_NAME: xauat-loginapi
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
-          envs: IMAGE,NETWORK_NAME,COMPOSE_PROJECT_NAME,GHCR_PULL_TOKEN
-          script: |
-            set -e
-            cd "${{ secrets.DEPLOY_PATH }}"
-            # compose 文件名可能已是 docker-compose.yml（上一次部署改名过），统一一下
-            if [ -f docker-compose.production.yml ]; then
-              mv -f docker-compose.production.yml docker-compose.yml
-            fi
-            # 幂等创建共享网络
-            docker network inspect "$NETWORK_NAME" >/dev/null 2>&1 || docker network create "$NETWORK_NAME"
-            if [ -n "$GHCR_PULL_TOKEN" ]; then
-              echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            fi
-            IMAGE="$IMAGE" docker compose pull loginapi
-            IMAGE="$IMAGE" docker compose up -d --no-build --remove-orphans loginapi
-            docker image prune -f
-            if [ -n "$GHCR_PULL_TOKEN" ]; then docker logout ghcr.io || true; fi
